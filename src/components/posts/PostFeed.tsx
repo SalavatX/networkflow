@@ -4,6 +4,7 @@ import { db } from '../../firebase/config';
 import PostItem from './PostItem';
 import CreatePost from './CreatePost';
 import { useAuth } from '../../contexts/AuthContext';
+import OnlineUsersList from '../users/OnlineUsersList';
 
 const PostFeed = () => {
   const { currentUser } = useAuth();
@@ -15,7 +16,6 @@ const PostFeed = () => {
   const postsPerPage = 5;
 
   useEffect(() => {
-    // Получаем первую порцию постов
     const postsRef = collection(db, 'posts');
     const postsQuery = query(
       postsRef,
@@ -75,50 +75,58 @@ const PostFeed = () => {
   };
 
   return (
-    <div className="max-w-3xl mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-10">
-      {currentUser && (
-        <div className="mb-6">
-          <CreatePost />
+    <div className="container mx-auto px-4 sm:px-6 lg:px-8 pt-20 pb-10">
+      <div className="grid grid-cols-1 md:grid-cols-12 gap-6">
+        <div className="md:col-span-3 md:col-start-10 md:order-2 order-1 mb-6 md:mb-0">
+          <OnlineUsersList />
         </div>
-      )}
-      
-      {loading ? (
-        <div className="flex justify-center items-center py-10">
-          <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
-        </div>
-      ) : posts.length > 0 ? (
-        <div className="space-y-6">
-          {posts.map(post => (
-            <PostItem key={post.id} post={post} />
-          ))}
+        
+        <div className="md:col-start-4 md:col-span-5 md:order-1 order-2">
+          {currentUser && (
+            <div className="mb-6">
+              <CreatePost />
+            </div>
+          )}
           
-          {hasMore && (
-            <div className="flex justify-center mt-6">
-              <button
-                onClick={loadMorePosts}
-                disabled={loadingMore}
-                className="btn-gradient px-6 py-2 flex items-center"
-              >
-                {loadingMore ? (
-                  <>
-                    <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
-                    Загрузка...
-                  </>
-                ) : (
-                  'Загрузить еще'
-                )}
-              </button>
+          {loading ? (
+            <div className="flex justify-center items-center py-10">
+              <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-indigo-500"></div>
+            </div>
+          ) : posts.length > 0 ? (
+            <div className="space-y-6">
+              {posts.map(post => (
+                <PostItem key={post.id} post={post} />
+              ))}
+              
+              {hasMore && (
+                <div className="flex justify-center mt-6">
+                  <button
+                    onClick={loadMorePosts}
+                    disabled={loadingMore}
+                    className="btn-gradient px-6 py-2 flex items-center"
+                  >
+                    {loadingMore ? (
+                      <>
+                        <div className="animate-spin rounded-full h-4 w-4 border-t-2 border-b-2 border-white mr-2"></div>
+                        Загрузка...
+                      </>
+                    ) : (
+                      'Загрузить еще'
+                    )}
+                  </button>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="bg-white rounded-lg shadow-md p-6 text-center">
+              <h2 className="text-xl font-semibold text-gray-800 mb-2">Нет постов</h2>
+              <p className="text-gray-600">
+                Здесь пока нет постов. Будьте первым, кто поделится чем-то интересным!
+              </p>
             </div>
           )}
         </div>
-      ) : (
-        <div className="bg-white rounded-lg shadow-md p-6 text-center">
-          <h2 className="text-xl font-semibold text-gray-800 mb-2">Нет постов</h2>
-          <p className="text-gray-600">
-            Здесь пока нет постов. Будьте первым, кто поделится чем-то интересным!
-          </p>
-        </div>
-      )}
+      </div>
     </div>
   );
 };

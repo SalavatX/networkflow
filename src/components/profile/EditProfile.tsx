@@ -12,6 +12,7 @@ interface ProfileData {
   bio: string;
   followers: string[];
   following: string[];
+  bannerURL?: string | null;
 }
 
 interface EditProfileProps {
@@ -24,21 +25,40 @@ const EditProfile = ({ profileData, onClose, onUpdate }: EditProfileProps) => {
   const [displayName, setDisplayName] = useState(profileData.displayName || '');
   const [bio, setBio] = useState(profileData.bio || '');
   const [photoURL] = useState(profileData.photoURL || '');
+  const [bannerURL] = useState(profileData.bannerURL || '');
   const [newPhoto, setNewPhoto] = useState<File | null>(null);
+  const [newBanner, setNewBanner] = useState<File | null>(null);
   const [photoPreview, setPhotoPreview] = useState<string | null>(photoURL);
-  const [loading] = useState(false);
+  const [bannerPreview, setBannerPreview] = useState<string | null>(bannerURL);
+  const [loading, setLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [, setError] = useState('');
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const bannerInputRef = useRef<HTMLInputElement>(null);
 
   const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const file = e.target.files[0];
       setNewPhoto(file);
       
-      // Создаем URL для предпросмотра
       const previewUrl = URL.createObjectURL(file);
       setPhotoPreview(previewUrl);
+    }
+  };
+
+  const handleBannerChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const file = e.target.files[0];
+      
+      if (file.size > 5 * 1024 * 1024) {
+        alert('Размер файла не должен превышать 5MB');
+        return;
+      }
+      
+      setNewBanner(file);
+      
+      const previewUrl = URL.createObjectURL(file);
+      setBannerPreview(previewUrl);
     }
   };
 
@@ -47,53 +67,54 @@ const EditProfile = ({ profileData, onClose, onUpdate }: EditProfileProps) => {
     
     if (isSubmitting) return;
     setIsSubmitting(true);
+    setLoading(true);
     
     try {
       let updatedPhotoURL = photoURL;
+      let updatedBannerURL = bannerURL;
       
-      // Если есть новое фото, загружаем его
       if (newPhoto) {
         try {
-          // Создаем путь для хранения фото профиля
           const storageRef = storage.ref(`users/${profileData.uid}`);
-          // Загружаем файл
           const uploadTask = await storageRef.put(newPhoto);
-          // Получаем URL загруженного файла
           updatedPhotoURL = await uploadTask.ref.getDownloadURL();
         } catch (error) {
           console.error('Ошибка при загрузке фото:', error);
-          // Если не удалось загрузить фото, продолжаем с текущим URL
         }
       }
       
-      // Обновляем данные в Firestore
+      if (newBanner) {
+        try {
+          const storageRef = storage.ref(`banners/${profileData.uid}`);
+          const uploadTask = await storageRef.put(newBanner);
+          updatedBannerURL = await uploadTask.ref.getDownloadURL();
+        } catch (error) {
+          console.error('Ошибка при загрузке баннера:', error);
+        }
+      }
+      
       const userDocRef = doc(db, 'users', profileData.uid);
       const updatedData = {
         displayName,
         bio,
-        photoURL: updatedPhotoURL
+        photoURL: updatedPhotoURL,
+        bannerURL: updatedBannerURL
       };
       
       await updateDoc(userDocRef, updatedData);
       
-      // Обновляем профиль в Firebase Auth
       if (auth.currentUser) {
         await updateProfile(auth.currentUser, {
           displayName,
           photoURL: updatedPhotoURL
         });
-        
-        // Обновление currentUser произойдет автоматически через onAuthStateChanged
-        // в AuthContext, поэтому нам не нужно вызывать setCurrentUser
       }
       
-      // Обновляем все посты пользователя с новым именем и фото
       try {
         const postsRef = collection(db, 'posts');
         const postsQuery = query(postsRef, where('authorId', '==', profileData.uid));
         const postsSnapshot = await getDocs(postsQuery);
         
-        // Обновляем каждый пост
         const batch = writeBatch(db);
         postsSnapshot.docs.forEach(postDoc => {
           batch.update(postDoc.ref, {
@@ -105,10 +126,8 @@ const EditProfile = ({ profileData, onClose, onUpdate }: EditProfileProps) => {
         await batch.commit();
       } catch (error) {
         console.error('Ошибка при обновлении постов:', error);
-        // Продолжаем выполнение даже при ошибке обновления постов
       }
       
-      // Уведомляем родительский компонент об обновлении
       onUpdate(updatedData);
       onClose();
       
@@ -117,6 +136,7 @@ const EditProfile = ({ profileData, onClose, onUpdate }: EditProfileProps) => {
       setError('Не удалось обновить профиль. Пожалуйста, попробуйте снова.');
     } finally {
       setIsSubmitting(false);
+      setLoading(false);
     }
   };
 
@@ -137,7 +157,41 @@ const EditProfile = ({ profileData, onClose, onUpdate }: EditProfileProps) => {
         </div>
         
         <form onSubmit={handleSubmit} className="p-4">
-          {/* Фото профиля */}
+          <div className="mb-4">
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Баннер профиля
+            </label>
+            <div className="relative h-32 w-full rounded-lg overflow-hidden border border-gray-300">
+              <div 
+                className="w-full h-full bg-cover bg-center"
+                style={{ 
+                  backgroundImage: bannerPreview 
+                    ? `url(${bannerPreview})` 
+                    : bannerURL 
+                      ? `url(${bannerURL})` 
+                      : 'linear-gradient(to right, #4f46e5, #7c3aed)'
+                }}
+              ></div>
+              <button
+                type="button"
+                onClick={() => bannerInputRef.current?.click()}
+                className="absolute bottom-2 right-2 bg-indigo-600 rounded-full p-2 text-white shadow-md hover:bg-indigo-700"
+              >
+                <PhotoIcon className="h-4 w-4" />
+              </button>
+              <input
+                type="file"
+                ref={bannerInputRef}
+                onChange={handleBannerChange}
+                accept="image/*"
+                className="hidden"
+              />
+            </div>
+            <p className="mt-1 text-xs text-gray-500">
+              Рекомендуемый размер: 1500x500px. Максимальный размер файла: 5MB
+            </p>
+          </div>
+          
           <div className="mb-4 flex flex-col items-center">
             <div className="relative">
               {photoPreview ? (
@@ -173,7 +227,6 @@ const EditProfile = ({ profileData, onClose, onUpdate }: EditProfileProps) => {
             </p>
           </div>
           
-          {/* Имя пользователя */}
           <div className="mb-4">
             <label htmlFor="displayName" className="block text-sm font-medium text-gray-700">
               Имя
@@ -188,7 +241,6 @@ const EditProfile = ({ profileData, onClose, onUpdate }: EditProfileProps) => {
             />
           </div>
           
-          {/* Биография */}
           <div className="mb-4">
             <label htmlFor="bio" className="block text-sm font-medium text-gray-700">
               О себе
@@ -202,7 +254,6 @@ const EditProfile = ({ profileData, onClose, onUpdate }: EditProfileProps) => {
             />
           </div>
           
-          {/* Кнопки действий */}
           <div className="flex justify-end space-x-3 mt-6">
             <button
               type="button"

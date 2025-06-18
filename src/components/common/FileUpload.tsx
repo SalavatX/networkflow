@@ -28,7 +28,6 @@ const FileUpload = ({
     const file = e.target.files?.[0];
     if (!file) return;
 
-    // Проверка размера файла
     const maxSizeBytes = maxSizeMB * 1024 * 1024;
     if (file.size > maxSizeBytes) {
       setError(`Файл слишком большой. Максимальный размер: ${maxSizeMB}MB`);
@@ -40,21 +39,19 @@ const FileUpload = ({
     setProgress(0);
 
     try {
-      // Создаем уникальное имя файла
+      
       const timestamp = new Date().getTime();
       const fileName = `${timestamp}_${file.name}`;
       const storageRef = storage.ref(`${folder}/${fileName}`);
 
-      // Загружаем файл
+      
       const uploadTask = await storageRef.put(file);
       
-      // Получаем URL загруженного файла
       const downloadURL = await uploadTask.ref.getDownloadURL();
       
-      // Передаем URL родительскому компоненту
       onFileUpload(downloadURL);
       
-      // Сбрасываем input
+    
       if (fileInputRef.current) {
         fileInputRef.current.value = '';
       }

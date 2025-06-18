@@ -9,12 +9,17 @@ import {
   serverTimestamp,
   doc,
   updateDoc,
-  increment
+  increment,
+  getDoc,
+  deleteDoc
 } from 'firebase/firestore';
 import { db } from '../../firebase/config';
 import { useAuth } from '../../contexts/AuthContext';
+import { TrashIcon, ShieldExclamationIcon } from '@heroicons/react/24/outline';
 import { formatDistanceToNow } from 'date-fns';
 import { ru } from 'date-fns/locale';
+import { createCommentNotification } from '../../services/notificationService';
+import { deleteCommentWithReason } from '../../services/moderationService';
 
 interface Comment {
   id: string;
@@ -30,13 +35,34 @@ interface CommentSectionProps {
 }
 
 const CommentSection = ({ postId }: CommentSectionProps) => {
-  const { currentUser, userData } = useAuth();
+  const { currentUser, userData, isAdmin } = useAuth();
   const [comments, setComments] = useState<Comment[]>([]);
   const [newComment, setNewComment] = useState('');
   const [loading, setLoading] = useState(false);
+  const [deletingCommentId, setDeletingCommentId] = useState<string | null>(null);
+  const [postAuthorId, setPostAuthorId] = useState<string | null>(null);
+  const [showModerationDialog, setShowModerationDialog] = useState(false);
+  const [selectedCommentId, setSelectedCommentId] = useState<string | null>(null);
+  const [moderationReason, setModerationReason] = useState('');
+  const [moderationInProgress, setModerationInProgress] = useState(false);
 
   useEffect(() => {
-    // Подписка на комментарии для данного поста
+    const fetchPostAuthor = async () => {
+      try {
+        const postDoc = await getDoc(doc(db, 'posts', postId));
+        if (postDoc.exists()) {
+          const postData = postDoc.data();
+          setPostAuthorId(postData.authorId);
+        }
+      } catch (error) {
+        console.error('Ошибка при получении информации о посте:', error);
+      }
+    };
+
+    fetchPostAuthor();
+  }, [postId]);
+
+  useEffect(() => {
     const commentsRef = collection(db, 'comments');
     const commentsQuery = query(
       commentsRef,
@@ -59,28 +85,42 @@ const CommentSection = ({ postId }: CommentSectionProps) => {
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
-    if (!newComment.trim() || !currentUser) return;
+    if (!newComment.trim() || !currentUser || !userData) return;
     
     setLoading(true);
     
     try {
-      // Добавляем новый комментарий
-      await addDoc(collection(db, 'comments'), {
+      const commentRef = await addDoc(collection(db, 'comments'), {
         postId,
         text: newComment,
         authorId: currentUser.uid,
-        authorName: userData?.displayName || 'Пользователь',
-        authorPhotoURL: userData?.photoURL || '',
+        authorName: userData.displayName || 'Пользователь',
+        authorPhotoURL: userData.photoURL || '',
         createdAt: serverTimestamp()
       });
       
-      // Увеличиваем счетчик комментариев в посте
       const postRef = doc(db, 'posts', postId);
       await updateDoc(postRef, {
-        commentsCount: increment(1)
+        commentsCount: increment(1),
+        comments: increment(1)
       });
       
-      // Очищаем поле ввода
+      if (postAuthorId && postAuthorId !== currentUser.uid) {
+        try {
+          await createCommentNotification(
+            currentUser.uid,
+            userData.displayName || 'Пользователь',
+            userData.photoURL,
+            postAuthorId,
+            postId,
+            commentRef.id,
+            newComment
+          );
+        } catch (error) {
+          console.error('Ошибка при создании уведомления о комментарии:', error);
+        }
+      }
+      
       setNewComment('');
     } catch (error) {
       console.error('Ошибка при добавлении комментария:', error);
@@ -92,12 +132,67 @@ const CommentSection = ({ postId }: CommentSectionProps) => {
   const formatDate = (date: Date) => {
     return formatDistanceToNow(date, { addSuffix: true, locale: ru });
   };
+  
+  const handleDeleteComment = async (commentId: string, isUserComment: boolean) => {
+    if (!currentUser) return;
+    
+    if (isAdmin && !isUserComment) {
+      setSelectedCommentId(commentId);
+      setShowModerationDialog(true);
+      return;
+    }
+    
+    try {
+      setDeletingCommentId(commentId);
+      
+      await deleteDoc(doc(db, 'comments', commentId));
+      
+      const postRef = doc(db, 'posts', postId);
+      await updateDoc(postRef, {
+        commentsCount: increment(-1),
+        comments: increment(-1)
+      });
+    } catch (error) {
+      console.error('Ошибка при удалении комментария:', error);
+      alert('Не удалось удалить комментарий. Пожалуйста, попробуйте снова.');
+    } finally {
+      setDeletingCommentId(null);
+    }
+  };
+  
+  const handleModerateComment = async () => {
+    if (!currentUser || !selectedCommentId || !isAdmin) return;
+    
+    if (!moderationReason.trim()) {
+      alert('Пожалуйста, укажите причину удаления комментария.');
+      return;
+    }
+    
+    try {
+      setModerationInProgress(true);
+      
+      await deleteCommentWithReason(
+        selectedCommentId,
+        currentUser.uid,
+        userData?.displayName || 'Администратор',
+        moderationReason.trim()
+      );
+      
+      setShowModerationDialog(false);
+      setSelectedCommentId(null);
+      setModerationReason('');
+    } catch (error) {
+      console.error('Ошибка при модерации комментария:', error);
+      alert('Не удалось удалить комментарий. Пожалуйста, попробуйте снова.');
+    } finally {
+      setModerationInProgress(false);
+    }
+  };
 
   return (
     <div className="p-4">
-      <h3 className="text-lg font-medium text-gray-900 mb-4">Комментарии</h3>
+      <h3 className="text-lg font-medium text-gray-900 mb-4">Комментарии ({comments.length})</h3>
       
-      {/* Форма добавления комментария */}
       {currentUser && (
         <form onSubmit={handleSubmit} className="mb-6">
           <div className="flex space-x-3">
@@ -142,47 +237,118 @@ const CommentSection = ({ postId }: CommentSectionProps) => {
         </form>
       )}
       
-      {/* Список комментариев */}
-      <div className="space-y-4">
-        {comments.length > 0 ? (
-          comments.map((comment) => (
-            <div key={comment.id} className="flex space-x-3">
-              <div className="flex-shrink-0">
-                {comment.authorPhotoURL ? (
-                  <img 
-                    src={comment.authorPhotoURL} 
-                    alt={comment.authorName} 
-                    className="h-8 w-8 rounded-full"
-                  />
-                ) : (
-                  <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
-                    <span className="text-gray-500 font-bold">
-                      {comment.authorName.charAt(0)}
-                    </span>
+      {comments.length > 0 ? (
+        <ul className="space-y-4">
+          {comments.map(comment => {
+            const isUserComment = currentUser ? currentUser.uid === comment.authorId : false;
+            const canDelete = isUserComment || (isAdmin || false);
+            
+            return (
+              <li key={comment.id} className="bg-gray-50 rounded-lg p-4">
+                <div className="flex justify-between">
+                  <div className="flex space-x-3">
+                    <div className="flex-shrink-0">
+                      {comment.authorPhotoURL ? (
+                        <img 
+                          src={comment.authorPhotoURL} 
+                          alt={comment.authorName} 
+                          className="h-8 w-8 rounded-full"
+                        />
+                      ) : (
+                        <div className="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center">
+                          <span className="text-gray-500 font-bold">
+                            {comment.authorName.charAt(0)}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                    <div>
+                      <div className="text-sm font-medium text-gray-900">{comment.authorName}</div>
+                      <div className="text-sm text-gray-500">
+                        {formatDate(comment.createdAt.toDate())}
+                      </div>
+                    </div>
                   </div>
-                )}
-              </div>
-              <div className="flex-1 bg-gray-50 rounded-lg px-4 py-2 sm:px-6 sm:py-4">
-                <div className="sm:flex sm:justify-between sm:items-baseline">
-                  <h3 className="text-sm font-medium text-gray-900">
-                    {comment.authorName}
-                  </h3>
-                  {comment.createdAt && (
-                    <p className="mt-1 text-xs text-gray-500 sm:mt-0 sm:ml-6">
-                      {formatDate(comment.createdAt.toDate())}
-                    </p>
+                  
+                  {canDelete && (
+                    <div>
+                      {isAdmin && !isUserComment && (
+                        <button
+                          onClick={() => {
+                            setSelectedCommentId(comment.id);
+                            setShowModerationDialog(true);
+                          }}
+                          className="text-yellow-500 hover:text-yellow-600 transition-colors mr-2"
+                          disabled={deletingCommentId === comment.id}
+                          title="Модерировать комментарий"
+                        >
+                          <ShieldExclamationIcon className="h-5 w-5" />
+                        </button>
+                      )}
+                      
+                      <button
+                        onClick={() => handleDeleteComment(comment.id, isUserComment)}
+                        className="text-red-500 hover:text-red-600 transition-colors"
+                        disabled={deletingCommentId === comment.id}
+                        title={isAdmin && !isUserComment ? "Модерировать комментарий" : "Удалить комментарий"}
+                      >
+                        <TrashIcon className="h-5 w-5" />
+                      </button>
+                    </div>
                   )}
                 </div>
-                <div className="mt-1 text-sm text-gray-700">
-                  <p>{comment.text}</p>
-                </div>
-              </div>
+                <div className="mt-2 text-sm text-gray-700">{comment.text}</div>
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <div className="text-center py-4 text-gray-500">
+          Нет комментариев. Будьте первым, кто оставит комментарий!
+        </div>
+      )}
+      
+      {/* Модерационный диалог */}
+      {showModerationDialog && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white rounded-lg shadow-xl max-w-md w-full p-6">
+            <h3 className="text-lg font-medium text-gray-900 mb-4">Модерация комментария</h3>
+            
+            <p className="text-gray-600 mb-4">
+              Пожалуйста, укажите причину удаления комментария. Эта причина будет отправлена автору комментария.
+            </p>
+            
+            <textarea
+              className="w-full border border-gray-300 rounded-md p-2 mb-4 focus:ring-indigo-500 focus:border-indigo-500"
+              rows={4}
+              placeholder="Причина удаления комментария..."
+              value={moderationReason}
+              onChange={(e) => setModerationReason(e.target.value)}
+            ></textarea>
+            
+            <div className="flex justify-end space-x-3">
+              <button
+                onClick={() => {
+                  setShowModerationDialog(false);
+                  setSelectedCommentId(null);
+                  setModerationReason('');
+                }}
+                className="px-4 py-2 text-gray-700 hover:text-gray-900"
+                disabled={moderationInProgress}
+              >
+                Отмена
+              </button>
+              <button
+                onClick={handleModerateComment}
+                className="px-4 py-2 bg-red-600 text-white rounded-md hover:bg-red-700 disabled:opacity-50"
+                disabled={moderationInProgress || !moderationReason.trim()}
+              >
+                {moderationInProgress ? 'Удаление...' : 'Удалить комментарий'}
+              </button>
             </div>
-          ))
-        ) : (
-          <p className="text-gray-500 text-center">Нет комментариев. Будьте первым!</p>
-        )}
-      </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

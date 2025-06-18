@@ -12,6 +12,7 @@ const Image = ({ src, alt, className = '', fallback = '', ...props }: ImageProps
   const [imageSrc, setImageSrc] = useState<string>(src);
   const [loading, setLoading] = useState<boolean>(src.startsWith('firestore://'));
   const [error, setError] = useState<boolean>(false);
+  const [retryCount, setRetryCount] = useState<number>(0);
 
   useEffect(() => {
     const loadImage = async () => {
@@ -38,6 +39,28 @@ const Image = ({ src, alt, className = '', fallback = '', ...props }: ImageProps
     loadImage();
   }, [src, fallback]);
 
+  const handleImageError = () => {
+    console.warn('Ошибка загрузки изображения:', src);
+    
+    if (retryCount < 2) {
+      setRetryCount(prev => prev + 1);
+      
+      if (src.includes('/posts/') && src.includes('//')) {
+        const fixedUrl = src.replace(/([^:])\/\/+/g, '$1/');
+        setImageSrc(fixedUrl);
+        return;
+      }
+      
+      const separator = src.includes('?') ? '&' : '?';
+      setImageSrc(`${src}${separator}retry=${Date.now()}`);
+    } else {
+      setError(true);
+      if (fallback) {
+        setImageSrc(fallback);
+      }
+    }
+  };
+
   if (loading) {
     return (
       <div className={`flex items-center justify-center bg-gray-100 ${className}`}>
@@ -54,7 +77,16 @@ const Image = ({ src, alt, className = '', fallback = '', ...props }: ImageProps
     );
   }
 
-  return <img src={imageSrc} alt={alt} className={className} {...props} />;
+  return (
+    <img 
+      src={imageSrc} 
+      alt={alt} 
+      className={className} 
+      onError={handleImageError}
+      loading="lazy"
+      {...props} 
+    />
+  );
 };
 
 export default Image; 
