@@ -153,6 +153,10 @@ const PostItem = ({ post: propPost }: PostItemProps) => {
 
   const formatDate = (date: any) => {
     try {
+      if (!date) {
+        return 'Недавно';
+      }
+      
       if (date && typeof date.toDate === 'function') {
         return formatDistanceToNow(date.toDate(), { addSuffix: true, locale: ru });
       }

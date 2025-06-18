@@ -129,8 +129,32 @@ const CommentSection = ({ postId }: CommentSectionProps) => {
     }
   };
 
-  const formatDate = (date: Date) => {
-    return formatDistanceToNow(date, { addSuffix: true, locale: ru });
+  const formatDate = (date: any) => {
+    try {
+      if (!date) {
+        return 'Недавно';
+      }
+      
+      if (date && typeof date.toDate === 'function') {
+        return formatDistanceToNow(date.toDate(), { addSuffix: true, locale: ru });
+      }
+      
+      if (typeof date === 'string') {
+        const parsedDate = new Date(date);
+        if (!isNaN(parsedDate.getTime())) {
+          return formatDistanceToNow(parsedDate, { addSuffix: true, locale: ru });
+        }
+      }
+      
+      if (date instanceof Date && !isNaN(date.getTime())) {
+        return formatDistanceToNow(date, { addSuffix: true, locale: ru });
+      }
+      
+      return 'Недавно';
+    } catch (error) {
+      console.error('Ошибка при форматировании даты:', error);
+      return 'Недавно';
+    }
   };
   
   const handleDeleteComment = async (commentId: string, isUserComment: boolean) => {
@@ -265,7 +289,7 @@ const CommentSection = ({ postId }: CommentSectionProps) => {
                     <div>
                       <div className="text-sm font-medium text-gray-900">{comment.authorName}</div>
                       <div className="text-sm text-gray-500">
-                        {formatDate(comment.createdAt.toDate())}
+                        {formatDate(comment.createdAt)}
                       </div>
                     </div>
                   </div>
